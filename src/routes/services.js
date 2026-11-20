@@ -85,6 +85,66 @@ export function parseServiceId(id) {
   return new ObjectId(id);
 }
 
+export function serializePublicService(service, vendor, now = new Date()) {
+  const expiresAt = vendor?.subscriptionExpiresAt
+    ? new Date(vendor.subscriptionExpiresAt)
+    : null;
+  const isPremium =
+    vendor?.subscriptionPlan === "premium" &&
+    expiresAt !== null &&
+    Number.isFinite(expiresAt.getTime()) &&
+    expiresAt > now;
+
+  return {
+    ...service,
+    vendor: vendor
+      ? {
+          name: vendor.name || "",
+          businessName: vendor.businessName || "",
+          isPremium,
+        }
+      : null,
+  };
+}
+
+async function loadPublicVendors(services) {
+  const vendorIds = [
+    ...new Set(
+      services
+        .map((service) => service.vendorId)
+        .filter((vendorId) => typeof vendorId === "string" && vendorId),
+    ),
+  ];
+  if (!vendorIds.length) {
+    return new Map();
+  }
+
+  const database = getDatabase();
+  const userIds = vendorIds.flatMap((vendorId) => {
+    const ids = [vendorId];
+    if (/^[a-f\d]{24}$/i.test(vendorId)) {
+      ids.push(new ObjectId(vendorId));
+    }
+    return ids;
+  });
+  const vendors = await database
+    .collection("users")
+    .find(
+      { _id: { $in: userIds } },
+      {
+        projection: {
+          name: 1,
+          businessName: 1,
+          subscriptionPlan: 1,
+          subscriptionExpiresAt: 1,
+        },
+      },
+    )
+    .toArray();
+
+  return new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
+}
+
 const router = Router();
 
 router.get("/", async (req, res) => {
@@ -94,8 +154,17 @@ router.get("/", async (req, res) => {
     .find(filter, { projection: publicServiceFields })
     .sort(sort)
     .toArray();
+  const vendors = await loadPublicVendors(services);
 
-  return res.json({ success: true, data: services });
+  return res.json({
+    success: true,
+    data: services.map((service) =>
+      serializePublicService(
+        service,
+        vendors.get(String(service.vendorId)),
+      ),
+    ),
+  });
 });
 
 router.get("/:id", async (req, res) => {
@@ -111,7 +180,11 @@ router.get("/:id", async (req, res) => {
     throw createHttpError(404, "Service not found");
   }
 
-  return res.json({ success: true, data: service });
+  const vendors = await loadPublicVendors([service]);
+  return res.json({
+    success: true,
+    data: serializePublicService(service, vendors.get(String(service.vendorId))),
+  });
 });
 
 export default router;
