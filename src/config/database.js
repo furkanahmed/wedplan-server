@@ -16,6 +16,14 @@ export async function connectDatabase() {
   await client.connect();
   await client.db(process.env.DB_NAME).command({ ping: 1 });
   database = client.db(process.env.DB_NAME);
+  const services = database.collection("services");
+  await services.createIndex({
+    serviceName: "text",
+    description: "text",
+    category: "text",
+    location: "text",
+  });
+  await services.createIndex({ status: 1, isActive: 1 });
 
   console.log(`MongoDB connected to ${process.env.DB_NAME}`);
   return database;
