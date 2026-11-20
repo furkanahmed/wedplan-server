@@ -7,7 +7,18 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN,
+    origin(origin, callback) {
+      const allowedOrigins = new Set(
+        [process.env.CLIENT_ORIGIN, process.env.NODE_ENV === "development"
+          ? "http://127.0.0.1:3000"
+          : undefined].filter(Boolean),
+      );
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   }),
 );
