@@ -28,7 +28,10 @@ async function callAuthEndpoint(clientOrigin, endpoint, body) {
   try {
     response = await fetch(new URL(`/api/auth/${endpoint}`, clientOrigin), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Origin: clientOrigin.origin,
+      },
       body: JSON.stringify(body),
     });
   } catch {
@@ -96,7 +99,14 @@ async function main() {
   const mongoClient = new MongoClient(mongoUri);
   try {
     await mongoClient.connect();
-    const users = mongoClient.db(databaseName).collection("users");
+    const uriDatabaseName = mongoClient.db().databaseName;
+    if (uriDatabaseName !== databaseName) {
+      throw new Error(
+        `DB_NAME (${databaseName}) does not match the database selected by MONGODB_URI (${uriDatabaseName}). Set both to the database used by frontend auth.`,
+      );
+    }
+
+    const users = mongoClient.db().collection("users");
     const existingUser = await users.findOne({ email: adminEmail });
 
     if (existingUser) {
