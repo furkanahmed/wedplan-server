@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import servicesRouter from "./routes/services.js";
+import vendorRouter from "./routes/vendor.js";
+import bookingsRouter from "./routes/bookings.js";
 
 const app = express();
 
@@ -29,6 +31,8 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/v1/services", servicesRouter);
+app.use("/api/v1/vendor", vendorRouter);
+app.use("/api/v1/bookings", bookingsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

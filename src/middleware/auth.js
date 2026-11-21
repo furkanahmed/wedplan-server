@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
-import { getDatabase } from "../config/database.js";
+import { connectDatabase } from "../config/database.js";
 
 const authenticationErrorCodes = new Set([
   "ERR_JOSE_ALG_NOT_ALLOWED",
@@ -103,9 +103,8 @@ export function loadUser(req, res, next) {
     userIds.push({ _id: new ObjectId(userId) });
   }
 
-  getDatabase()
-    .collection("users")
-    .findOne({ $or: userIds })
+  connectDatabase()
+    .then((database) => database.collection("users").findOne({ $or: userIds }))
     .then((user) => {
       if (!user) {
         return next(createHttpError(401, "User account was not found"));
