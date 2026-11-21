@@ -1,5 +1,25 @@
 # WedPlan backend
 
+## Admin API
+
+The admin API is available under `/api/v1/admin` and requires a valid
+Better Auth bearer token for an admin account:
+
+- `GET /overview` returns user, vendor, customer, service, pending-service, and
+  transaction counts.
+- `GET /users` supports `search`, `role`, `page`, and `pageSize`.
+- `PATCH /users/:id/block` accepts `{ "isBlocked": true|false }`. Admin accounts
+  are protected from being blocked.
+- `GET /services` supports `search`, `status`, `page`, and `pageSize`.
+- `PATCH /services/:id` accepts an approved/rejected/pending `status` and/or
+  boolean `isActive`; `DELETE /services/:id` removes a service.
+- `GET /transactions` is a read-only, paginated list with a restricted set of
+  summary fields.
+
+The current application does not create payment transactions. The admin
+overview and list read from the `transactions` collection, so they report zero
+and an empty list until a payment flow writes transaction records.
+
 ## Development sample services (extra decision)
 
 The development seed contains eight fictional sample listings and three

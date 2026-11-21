@@ -5,6 +5,7 @@ import servicesRouter from "./routes/services.js";
 import vendorRouter from "./routes/vendor.js";
 import bookingsRouter from "./routes/bookings.js";
 import customerRouter from "./routes/customer.js";
+import adminRouter from "./routes/admin.js";
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/vendor", vendorRouter);
 app.use("/api/v1/bookings", bookingsRouter);
 app.use("/api/v1/customer", customerRouter);
+app.use("/api/v1/admin", adminRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
