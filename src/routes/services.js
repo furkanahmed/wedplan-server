@@ -1,6 +1,14 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { connectDatabase } from "../config/database.js";
+import { loadUser, verifyJwt } from "../middleware/auth.js";
+import { requireRole } from "../middleware/requireRole.js";
+import { getVendorIds } from "../utils/vendor-id.js";
+import {
+  assertCanActivateService,
+  isCurrentPremiumVendor,
+  withVendorServiceQuota,
+} from "../utils/vendor-service-quota.js";
 
 const publicServiceFields = {
   _id: 1,
@@ -13,6 +21,23 @@ const publicServiceFields = {
   images: 1,
   createdAt: 1,
 };
+const allowedServiceFields = new Set([
+  "serviceName",
+  "category",
+  "description",
+  "price",
+  "location",
+  "images",
+  "isActive",
+]);
+const serviceCategories = new Set([
+  "Photography & Videography",
+  "Wedding Venues",
+  "Decoration & Florist",
+  "Catering Services",
+  "Makeup & Styling",
+  "Wedding Fashion",
+]);
 
 function createHttpError(statusCode, message) {
   const error = new Error(message);
@@ -85,23 +110,117 @@ export function parseServiceId(id) {
   return new ObjectId(id);
 }
 
-export function serializePublicService(service, vendor, now = new Date()) {
-  const expiresAt = vendor?.subscriptionExpiresAt
-    ? new Date(vendor.subscriptionExpiresAt)
-    : null;
-  const isPremium =
-    vendor?.subscriptionPlan === "premium" &&
-    expiresAt !== null &&
-    Number.isFinite(expiresAt.getTime()) &&
-    expiresAt > now;
+export function parseVendorServiceInput(body, { partial = false } = {}) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw createHttpError(400, "A service object is required");
+  }
 
+  const unsupportedField = Object.keys(body).find(
+    (field) => !allowedServiceFields.has(field) || (field === "isActive" && !partial),
+  );
+  if (unsupportedField) {
+    throw createHttpError(400, `Unsupported service field: ${unsupportedField}`);
+  }
+
+  const fields = {};
+  const stringFields = [
+    ["serviceName", 120],
+    ["category", 80],
+    ["description", 5000],
+    ["location", 100],
+  ];
+
+  for (const [field, maxLength] of stringFields) {
+    if (!Object.hasOwn(body, field)) {
+      if (!partial) {
+        throw createHttpError(400, `${field} is required`);
+      }
+      continue;
+    }
+
+    const value = body[field];
+    if (typeof value !== "string" || !value.trim()) {
+      throw createHttpError(400, `${field} must be a non-empty string`);
+    }
+
+    const trimmedValue = value.trim();
+    if (trimmedValue.length > maxLength) {
+      throw createHttpError(400, `${field} must be at most ${maxLength} characters`);
+    }
+    if (field === "category" && !serviceCategories.has(trimmedValue)) {
+      throw createHttpError(400, "Choose a valid service category");
+    }
+    fields[field] = trimmedValue;
+  }
+
+  if (Object.hasOwn(body, "price")) {
+    if (
+      typeof body.price !== "number" ||
+      !Number.isFinite(body.price) ||
+      body.price <= 0
+    ) {
+      throw createHttpError(400, "price must be a positive number");
+    }
+    fields.price = body.price;
+  } else if (!partial) {
+    throw createHttpError(400, "price is required");
+  }
+
+  if (Object.hasOwn(body, "isActive")) {
+    if (typeof body.isActive !== "boolean") {
+      throw createHttpError(400, "isActive must be a boolean");
+    }
+    fields.isActive = body.isActive;
+  }
+
+  if (Object.hasOwn(body, "images")) {
+    if (!Array.isArray(body.images)) {
+      throw createHttpError(400, "images must be an array of HTTP(S) URLs");
+    }
+    fields.images = body.images.map((image) => {
+      if (typeof image !== "string" || image.length > 2048) {
+        throw createHttpError(400, "Each image must be a valid HTTP(S) URL");
+      }
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(image.trim());
+      } catch {
+        throw createHttpError(400, "Each image must be a valid HTTP(S) URL");
+      }
+      if (
+        !image.trim() ||
+        (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:")
+      ) {
+        throw createHttpError(400, "Each image must be a valid HTTP(S) URL");
+      }
+      return image.trim();
+    });
+  } else if (!partial) {
+    fields.images = [];
+  }
+
+  if (partial && Object.keys(fields).length === 0) {
+    throw createHttpError(400, "At least one service field must be provided");
+  }
+
+  return fields;
+}
+
+export function createOwnedServiceFilter(serviceId, vendorId) {
+  return {
+    _id: serviceId,
+    vendorId: { $in: getVendorIds(vendorId) },
+  };
+}
+
+export function serializePublicService(service, vendor, now = new Date()) {
   return {
     ...service,
     vendor: vendor
       ? {
           name: vendor.name || "",
           businessName: vendor.businessName || "",
-          isPremium,
+          isPremium: isCurrentPremiumVendor(vendor, now),
         }
       : null,
   };
@@ -112,7 +231,7 @@ async function loadPublicVendors(services, database) {
     ...new Set(
       services
         .map((service) => service.vendorId)
-        .filter((vendorId) => typeof vendorId === "string" && vendorId),
+        .filter((vendorId) => vendorId !== undefined && vendorId !== null),
     ),
   ];
   if (!vendorIds.length) {
@@ -145,6 +264,7 @@ async function loadPublicVendors(services, database) {
 }
 
 const router = Router();
+const vendorOnly = [verifyJwt, loadUser, requireRole("vendor")];
 
 router.get("/", async (req, res) => {
   const { filter, sort } = parsePublicServiceQuery(req.query);
@@ -186,6 +306,81 @@ router.get("/:id", async (req, res) => {
     success: true,
     data: serializePublicService(service, vendors.get(String(service.vendorId))),
   });
+});
+
+router.post("/", ...vendorOnly, async (req, res) => {
+  const fields = parseVendorServiceInput(req.body);
+  const database = await connectDatabase();
+  const service = await withVendorServiceQuota(
+    database,
+    req.user._id,
+    async ({ session, vendor, activeServiceCount }) => {
+      assertCanActivateService(vendor, activeServiceCount);
+      const newService = {
+        ...fields,
+        vendorId: String(vendor._id),
+        status: "pending",
+        isActive: true,
+        createdAt: new Date(),
+      };
+      const result = await database
+        .collection("services")
+        .insertOne(newService, { session });
+      return { ...newService, _id: result.insertedId };
+    },
+  );
+
+  return res.status(201).json({ success: true, data: service });
+});
+
+router.patch("/:id", ...vendorOnly, async (req, res) => {
+  const serviceId = parseServiceId(req.params.id);
+  const fields = parseVendorServiceInput(req.body, { partial: true });
+  const database = await connectDatabase();
+  const collection = database.collection("services");
+  const filter = createOwnedServiceFilter(serviceId, req.user._id);
+  if (Object.hasOwn(fields, "isActive")) {
+    const service = await withVendorServiceQuota(
+      database,
+      req.user._id,
+      async ({ session, vendor, activeServiceCount }) => {
+        const currentService = await collection.findOne(filter, { session });
+        if (!currentService) {
+          throw createHttpError(404, "Service not found");
+        }
+
+        assertCanActivateService(vendor, activeServiceCount, {
+          alreadyActive: currentService.isActive === true,
+        });
+        await collection.updateOne(filter, { $set: fields }, { session });
+        return collection.findOne(filter, { session });
+      },
+    );
+    return res.json({ success: true, data: service });
+  }
+
+  const result = await collection.updateOne(filter, { $set: fields });
+
+  if (!result.matchedCount) {
+    throw createHttpError(404, "Service not found");
+  }
+
+  const service = await collection.findOne(filter);
+  return res.json({ success: true, data: service });
+});
+
+router.delete("/:id", ...vendorOnly, async (req, res) => {
+  const serviceId = parseServiceId(req.params.id);
+  const database = await connectDatabase();
+  const result = await database
+    .collection("services")
+    .deleteOne(createOwnedServiceFilter(serviceId, req.user._id));
+
+  if (!result.deletedCount) {
+    throw createHttpError(404, "Service not found");
+  }
+
+  return res.json({ success: true, data: { id: serviceId.toHexString() } });
 });
 
 export default router;

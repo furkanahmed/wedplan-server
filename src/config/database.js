@@ -30,6 +30,11 @@ export async function connectDatabase() {
       location: "text",
     });
     await services.createIndex({ status: 1, isActive: 1 });
+    await services.createIndex({ vendorId: 1 });
+    const bookings = connectedDatabase.collection("bookings");
+    await bookings.createIndex({ vendorId: 1, status: 1, createdAt: -1 });
+    await bookings.createIndex({ customerId: 1, createdAt: -1 });
+    await bookings.createIndex({ serviceId: 1 });
 
     database = connectedDatabase;
     console.log(`MongoDB connected to ${process.env.DB_NAME}`);

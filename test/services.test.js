@@ -1,15 +1,108 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createOwnedServiceFilter,
+  parseVendorServiceInput,
   parsePublicServiceQuery,
   parseServiceId,
   serializePublicService,
 } from "../src/routes/services.js";
+import { loadVendorOverview } from "../src/routes/vendor.js";
+import {
+  assertCanActivateService,
+  isCurrentPremiumVendor,
+  withVendorServiceQuota,
+} from "../src/utils/vendor-service-quota.js";
 import {
   DEV_SERVICES,
   DEV_SERVICE_VENDORS,
 } from "../scripts/dev-service-data.js";
 import app from "../src/app.js";
+import { requireRole } from "../src/middleware/requireRole.js";
+import {
+  createVendorBookingFilter,
+  parseBookingId,
+  parseBookingInput,
+  parseBookingStatus,
+} from "../src/routes/bookings.js";
+
+test("booking requests validate the confirmed service form fields", () => {
+  const booking = parseBookingInput({
+    serviceId: "507f1f77bcf86cd799439011",
+    eventDate: "2026-12-20",
+    eventLocation: "Dhaka",
+    message: "Please contact us for a wedding package.",
+  });
+
+  assert.equal(booking.serviceId.toHexString(), "507f1f77bcf86cd799439011");
+  assert.equal(booking.eventDate, "2026-12-20");
+  assert.equal(booking.eventLocation, "Dhaka");
+  assert.equal(booking.message, "Please contact us for a wedding package.");
+  assert.throws(
+    () => parseBookingInput({ serviceId: "not-an-id" }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () =>
+      parseBookingInput({
+        serviceId: "507f1f77bcf86cd799439011",
+        eventDate: "2026-02-30",
+        eventLocation: "Dhaka",
+        message: "Invalid date",
+      }),
+    { statusCode: 400 },
+  );
+});
+
+test("booking status changes only allow accept or reject and stay vendor-owned", () => {
+  assert.equal(parseBookingStatus("accepted"), "accepted");
+  assert.equal(parseBookingStatus("rejected"), "rejected");
+  assert.throws(() => parseBookingStatus("cancelled"), { statusCode: 400 });
+  assert.equal(
+    parseBookingId("507f1f77bcf86cd799439012").toHexString(),
+    "507f1f77bcf86cd799439012",
+  );
+  assert.throws(() => parseBookingId("bad-id"), { statusCode: 400 });
+
+  const filter = createVendorBookingFilter(
+    parseBookingId("507f1f77bcf86cd799439012"),
+    "507f1f77bcf86cd799439013",
+  );
+  assert.equal(filter._id.toHexString(), "507f1f77bcf86cd799439012");
+  assert.deepEqual(filter.vendorId.$in.map(String), [
+    "507f1f77bcf86cd799439013",
+    "507f1f77bcf86cd799439013",
+  ]);
+});
+
+test("requireRole allows vendors and rejects unauthenticated or wrong-role requests", () => {
+  const vendorMiddleware = requireRole("vendor");
+
+  assert.equal(
+    vendorMiddleware(
+      { user: { role: "customer" } },
+      {},
+      (error) => assert.equal(error.statusCode, 403),
+    ),
+    undefined,
+  );
+  vendorMiddleware(
+    {},
+    {},
+    (error) => assert.equal(error.statusCode, 401),
+  );
+
+  let nextCalled = false;
+  vendorMiddleware(
+    { user: { role: "vendor" } },
+    {},
+    (error) => {
+      assert.equal(error, undefined);
+      nextCalled = true;
+    },
+  );
+  assert.equal(nextCalled, true);
+});
 
 test("public service queries always include approved and active filters", () => {
   const { filter } = parsePublicServiceQuery({});
@@ -62,6 +155,147 @@ test("service detail IDs must be 24-character hexadecimal ObjectIds", () => {
   assert.throws(() => parseServiceId("not-an-id"), { statusCode: 400 });
 });
 
+test("vendor service input validates fields and normalizes image URLs", () => {
+  const service = parseVendorServiceInput({
+    serviceName: "  Wedding photography  ",
+    category: "Photography & Videography",
+    description: " Full-day coverage ",
+    price: 25000,
+    location: " Dhaka ",
+    images: [" https://images.example.com/one.jpg "],
+  });
+
+  assert.deepEqual(service, {
+    serviceName: "Wedding photography",
+    category: "Photography & Videography",
+    description: "Full-day coverage",
+    price: 25000,
+    location: "Dhaka",
+    images: ["https://images.example.com/one.jpg"],
+  });
+  assert.throws(
+    () => parseVendorServiceInput({ ...service, vendorId: "another-vendor" }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseVendorServiceInput({ ...service, status: "approved" }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseVendorServiceInput({ ...service, images: ["javascript:alert(1)"] }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseVendorServiceInput({ price: -1 }, { partial: true }),
+    { statusCode: 400 },
+  );
+  assert.deepEqual(
+    parseVendorServiceInput({ isActive: false }, { partial: true }),
+    { isActive: false },
+  );
+  assert.throws(
+    () => parseVendorServiceInput({ isActive: "false" }, { partial: true }),
+    { statusCode: 400 },
+  );
+  assert.throws(
+    () => parseVendorServiceInput({ ...service, isActive: false }),
+    { statusCode: 400 },
+  );
+});
+
+test("free vendors can have at most three active services", () => {
+  const freeVendor = { subscriptionPlan: "free" };
+  assert.doesNotThrow(() => assertCanActivateService(freeVendor, 2));
+  assert.throws(() => assertCanActivateService(freeVendor, 3), {
+    statusCode: 409,
+  });
+  assert.doesNotThrow(() =>
+    assertCanActivateService(freeVendor, 3, { alreadyActive: true }),
+  );
+});
+
+test("current premium vendors bypass the active-service limit", () => {
+  const now = new Date("2026-11-21T00:00:00.000Z");
+  const premiumVendor = {
+    subscriptionPlan: "premium",
+    subscriptionExpiresAt: new Date("2026-12-01T00:00:00.000Z"),
+  };
+  const expiredVendor = {
+    subscriptionPlan: "premium",
+    subscriptionExpiresAt: new Date("2026-11-01T00:00:00.000Z"),
+  };
+
+  assert.equal(isCurrentPremiumVendor(premiumVendor, now), true);
+  assert.equal(isCurrentPremiumVendor(expiredVendor, now), false);
+  assert.doesNotThrow(() =>
+    assertCanActivateService(premiumVendor, 10, { now }),
+  );
+  assert.throws(
+    () => assertCanActivateService(expiredVendor, 3, { now }),
+    { statusCode: 409 },
+  );
+});
+
+test("service quota operations serialize against the vendor account", async () => {
+  const calls = [];
+  const session = {
+    withTransaction: async (operation) => operation(),
+    endSession: async () => calls.push("session-ended"),
+  };
+  const vendor = { _id: "vendor-1", role: "vendor", subscriptionPlan: "free" };
+  const database = {
+    client: {
+      startSession: () => session,
+    },
+    collection(name) {
+      if (name === "users") {
+        return {
+          updateOne: async (filter, update, options) => {
+            calls.push({ name, filter, update, options });
+            return { matchedCount: 1 };
+          },
+          findOne: async (filter, options) => {
+            calls.push({ name, find: filter, options });
+            return vendor;
+          },
+        };
+      }
+      return {
+        countDocuments: async (filter, options) => {
+          calls.push({ name, filter, options });
+          return 2;
+        },
+      };
+    },
+  };
+
+  const result = await withVendorServiceQuota(database, vendor._id, async (context) => ({
+    vendor: context.vendor,
+    activeServiceCount: context.activeServiceCount,
+  }));
+
+  assert.equal(result.vendor, vendor);
+  assert.equal(result.activeServiceCount, 2);
+  assert.equal(calls[0].update.$inc.serviceQuotaRevision, 1);
+  assert.equal(calls[0].options.session, session);
+  assert.equal(calls.find((call) => call.name === "services").options.session, session);
+  assert.equal(calls.at(-1), "session-ended");
+});
+
+test("vendor service ownership filters match string and ObjectId owner IDs", () => {
+  const filter = createOwnedServiceFilter(
+    parseServiceId("507f1f77bcf86cd799439011"),
+    "507f1f77bcf86cd799439012",
+  );
+
+  assert.equal(filter._id.toHexString(), "507f1f77bcf86cd799439011");
+  assert.deepEqual(filter.vendorId.$in.map(String), [
+    "507f1f77bcf86cd799439012",
+    "507f1f77bcf86cd799439012",
+  ]);
+  assert.notEqual(filter.vendorId.$in[0], filter.vendorId.$in[1]);
+});
+
 test("public services include safe vendor details and only mark current premium plans", () => {
   const now = new Date("2026-11-20T00:00:00.000Z");
   const service = { serviceName: "Wedding photography", vendorId: "vendor-1" };
@@ -93,6 +327,71 @@ test("public services include safe vendor details and only mark current premium 
       .vendor.isPremium,
     false,
   );
+});
+
+test("vendor overview counts owned services and booking statuses", async () => {
+  const calls = [];
+  const database = {
+    collection(name) {
+      return {
+        countDocuments: async (filter) => {
+          calls.push({ name, filter });
+          if (name === "services") {
+            return filter.isActive ? 2 : 5;
+          }
+          return filter.status === "pending" ? 3 : 1;
+        },
+      };
+    },
+  };
+  const now = new Date("2026-11-20T00:00:00.000Z");
+  const vendor = {
+    _id: "507f1f77bcf86cd799439011",
+    subscriptionPlan: "premium",
+    subscriptionExpiresAt: new Date("2026-12-01T00:00:00.000Z"),
+  };
+
+  const overview = await loadVendorOverview(database, vendor, now);
+
+  assert.deepEqual(overview, {
+    totalServices: 5,
+    activeServices: 2,
+    pendingRequests: 3,
+    acceptedBookings: 1,
+    currentPlan: "premium",
+  });
+  assert.deepEqual(
+    calls.map(({ name, filter }) => [
+      name,
+      filter.vendorId.$in.map(String),
+      filter.isActive ?? filter.status,
+    ]),
+    [
+      ["services", [vendor._id, vendor._id], undefined],
+      ["services", [vendor._id, vendor._id], true],
+      ["bookings", [vendor._id, vendor._id], "pending"],
+      ["bookings", [vendor._id, vendor._id], "accepted"],
+    ],
+  );
+});
+
+test("vendor overview treats an expired premium subscription as free", async () => {
+  const database = {
+    collection() {
+      return { countDocuments: async () => 0 };
+    },
+  };
+  const overview = await loadVendorOverview(
+    database,
+    {
+      _id: "vendor-1",
+      subscriptionPlan: "premium",
+      subscriptionExpiresAt: new Date("2026-11-01T00:00:00.000Z"),
+    },
+    new Date("2026-11-20T00:00:00.000Z"),
+  );
+
+  assert.equal(overview.currentPlan, "free");
 });
 
 test("development sample services cover every category in the six newest records", () => {
@@ -144,7 +443,55 @@ test("public services routes return 400 for invalid sort and service IDs", async
   const idResponse = await fetch(
     `http://127.0.0.1:${port}/api/v1/services/not-an-id`,
   );
+  const vendorOverviewResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/vendor/overview`,
+  );
+  const vendorServicesResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/vendor/services`,
+  );
+  const createServiceResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/services`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const toggleServiceResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/services/507f1f77bcf86cd799439011`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: false }),
+    },
+  );
+  const createBookingResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/bookings`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const vendorBookingsResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/bookings`,
+  );
+  const updateBookingResponse = await fetch(
+    `http://127.0.0.1:${port}/api/v1/bookings/507f1f77bcf86cd799439011/status`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "accepted" }),
+    },
+  );
 
   assert.equal(sortResponse.status, 400);
   assert.equal(idResponse.status, 400);
+  assert.equal(vendorOverviewResponse.status, 401);
+  assert.equal(vendorServicesResponse.status, 401);
+  assert.equal(createServiceResponse.status, 401);
+  assert.equal(toggleServiceResponse.status, 401);
+  assert.equal(createBookingResponse.status, 401);
+  assert.equal(vendorBookingsResponse.status, 401);
+  assert.equal(updateBookingResponse.status, 401);
 });
