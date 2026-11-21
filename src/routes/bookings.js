@@ -4,6 +4,7 @@ import { connectDatabase } from "../config/database.js";
 import { loadUser, verifyJwt } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { getVendorIds } from "../utils/vendor-id.js";
+import { getObjectIdAndStringIds, getUserIds } from "../utils/user-id.js";
 import { parseServiceId } from "./services.js";
 
 function createHttpError(statusCode, message) {
@@ -118,6 +119,23 @@ router.post(
       throw createHttpError(404, "Available service not found");
     }
 
+    const normalizedVendorIds = getVendorIds(req.user._id).map(String);
+    if (normalizedVendorIds.includes(String(service.vendorId))) {
+      throw createHttpError(403, "You cannot book your own service");
+    }
+
+    const duplicate = await database.collection("bookings").findOne({
+      customerId: { $in: getUserIds(req.user._id) },
+      serviceId: { $in: getObjectIdAndStringIds(fields.serviceId) },
+      status: { $in: ["pending", "accepted"] },
+    });
+    if (duplicate) {
+      throw createHttpError(
+        409,
+        "You already have an active booking request for this service",
+      );
+    }
+
     const booking = {
       serviceId: fields.serviceId,
       vendorId: service.vendorId,
@@ -225,7 +243,78 @@ router.patch(
       throw createHttpError(404, "Booking not found");
     }
 
-    const booking = await collection.findOne(filter);
+    const booking = await collection.findOne(
+      createVendorBookingFilter(bookingId, req.user._id),
+    );
+    return res.json({ success: true, data: booking });
+  },
+);
+
+router.get(
+  "/my",
+  verifyJwt,
+  loadUser,
+  requireRole("customer"),
+  async (req, res) => {
+    const database = await connectDatabase();
+    const rawBookings = await database
+      .collection("bookings")
+      .find({ customerId: { $in: getUserIds(req.user._id) } })
+      .sort({ createdAt: -1, _id: -1 })
+      .toArray();
+
+    const serviceIds = [
+      ...new Set(rawBookings.map((booking) => String(booking.serviceId))),
+    ].filter((id) => /^[a-f\d]{24}$/i.test(id));
+    const services = serviceIds.length
+      ? await database
+          .collection("services")
+          .find(
+            { _id: { $in: serviceIds.map((id) => new ObjectId(id)) } },
+            { projection: { serviceName: 1 } },
+          )
+          .toArray()
+      : [];
+    const servicesById = new Map(
+      services.map((service) => [String(service._id), service]),
+    );
+    const bookings = rawBookings.map((booking) => ({
+      ...booking,
+      serviceName:
+        servicesById.get(String(booking.serviceId))?.serviceName ||
+        "Wedding service",
+    }));
+
+    return res.json({ success: true, data: bookings });
+  },
+);
+
+router.patch(
+  "/:id/cancel",
+  verifyJwt,
+  loadUser,
+  requireRole("customer"),
+  async (req, res) => {
+    const bookingId = parseBookingId(req.params.id);
+    const database = await connectDatabase();
+    const collection = database.collection("bookings");
+    const filter = {
+      _id: bookingId,
+      customerId: { $in: getUserIds(req.user._id) },
+      status: { $in: ["pending", "accepted"] },
+    };
+    const result = await collection.updateOne(filter, {
+      $set: { status: "cancelled", cancelledAt: new Date() },
+    });
+
+    if (!result.matchedCount) {
+      throw createHttpError(404, "Cancellable booking not found");
+    }
+
+    const booking = await collection.findOne({
+      _id: bookingId,
+      customerId: { $in: getUserIds(req.user._id) },
+    });
     return res.json({ success: true, data: booking });
   },
 );
