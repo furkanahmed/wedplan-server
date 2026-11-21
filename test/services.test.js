@@ -7,7 +7,10 @@ import {
   parseServiceId,
   serializePublicService,
 } from "../src/routes/services.js";
-import { loadVendorOverview } from "../src/routes/vendor.js";
+import {
+  loadVendorOverview,
+  parseVendorProfileInput,
+} from "../src/routes/vendor.js";
 import {
   assertCanActivateService,
   isCurrentPremiumVendor,
@@ -48,6 +51,31 @@ test("customer profile input accepts only name and image updates", () => {
     statusCode: 400,
   });
   assert.throws(() => parseCustomerProfileInput({}), { statusCode: 400 });
+});
+
+test("vendor profile input validates contact and business details", () => {
+  assert.deepEqual(
+    parseVendorProfileInput({
+      name: "  Contact Person  ",
+      businessName: "  Wedding Studio  ",
+      image: " https://images.example.com/vendor.jpg ",
+    }),
+    {
+      name: "Contact Person",
+      businessName: "Wedding Studio",
+      image: "https://images.example.com/vendor.jpg",
+    },
+  );
+  assert.deepEqual(parseVendorProfileInput({ image: null }), { image: null });
+  assert.throws(() => parseVendorProfileInput({ role: "admin" }), {
+    statusCode: 400,
+  });
+  assert.throws(() => parseVendorProfileInput({ businessName: " " }), {
+    statusCode: 400,
+  });
+  assert.throws(() => parseVendorProfileInput({ image: "javascript:alert(1)" }), {
+    statusCode: 400,
+  });
 });
 
 test("customer overview counts owned booking statuses", async () => {
