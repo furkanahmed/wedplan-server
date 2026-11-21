@@ -34,6 +34,7 @@ export async function connectDatabase() {
     const bookings = connectedDatabase.collection("bookings");
     await bookings.createIndex({ vendorId: 1, status: 1, createdAt: -1 });
     await bookings.createIndex({ customerId: 1, createdAt: -1 });
+    await bookings.createIndex({ customerId: 1, serviceId: 1, status: 1 });
     await bookings.createIndex({ serviceId: 1 });
 
     database = connectedDatabase;

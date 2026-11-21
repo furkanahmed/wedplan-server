@@ -25,6 +25,73 @@ import {
   parseBookingInput,
   parseBookingStatus,
 } from "../src/routes/bookings.js";
+import {
+  createCustomerBookingFilter,
+  loadCustomerOverview,
+  parseCustomerProfileInput,
+} from "../src/routes/customer.js";
+
+test("customer profile input accepts only name and image updates", () => {
+  assert.deepEqual(
+    parseCustomerProfileInput({
+      name: "  Customer Name  ",
+      image: " https://images.example.com/customer.jpg ",
+    }),
+    {
+      name: "Customer Name",
+      image: "https://images.example.com/customer.jpg",
+    },
+  );
+  assert.deepEqual(parseCustomerProfileInput({ image: null }), { image: null });
+  assert.throws(() => parseCustomerProfileInput({ role: "admin" }), {
+    statusCode: 400,
+  });
+  assert.throws(() => parseCustomerProfileInput({}), { statusCode: 400 });
+});
+
+test("customer overview counts owned booking statuses", async () => {
+  const calls = [];
+  const database = {
+    collection(name) {
+      return {
+        countDocuments: async (filter) => {
+          calls.push({ name, filter });
+          if (filter.status === "pending") return 3;
+          if (filter.status === "accepted") return 2;
+          if (filter.status === "rejected") return 1;
+          return 6;
+        },
+      };
+    },
+  };
+  const overview = await loadCustomerOverview(database, {
+    _id: "507f1f77bcf86cd799439011",
+  });
+
+  assert.deepEqual(overview, {
+    totalBookings: 6,
+    pendingBookings: 3,
+    acceptedBookings: 2,
+    rejectedBookings: 1,
+  });
+  assert.ok(calls.every(({ name }) => name === "bookings"));
+  assert.deepEqual(
+    calls[0].filter.customerId.$in.map(String),
+    ["507f1f77bcf86cd799439011", "507f1f77bcf86cd799439011"],
+  );
+});
+
+test("customer booking cancellation stays owner-scoped", () => {
+  const filter = createCustomerBookingFilter(
+    parseBookingId("507f1f77bcf86cd799439012"),
+    "507f1f77bcf86cd799439013",
+  );
+  assert.equal(filter._id.toHexString(), "507f1f77bcf86cd799439012");
+  assert.deepEqual(filter.customerId.$in.map(String), [
+    "507f1f77bcf86cd799439013",
+    "507f1f77bcf86cd799439013",
+  ]);
+});
 
 test("booking requests validate the confirmed service form fields", () => {
   const booking = parseBookingInput({
@@ -69,6 +136,7 @@ test("booking status changes only allow accept or reject and stay vendor-owned",
     "507f1f77bcf86cd799439013",
   );
   assert.equal(filter._id.toHexString(), "507f1f77bcf86cd799439012");
+  assert.equal("status" in filter, false);
   assert.deepEqual(filter.vendorId.$in.map(String), [
     "507f1f77bcf86cd799439013",
     "507f1f77bcf86cd799439013",
