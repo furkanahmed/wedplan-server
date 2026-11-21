@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
-import { getDatabase } from "../config/database.js";
+import { connectDatabase } from "../config/database.js";
 
 const publicServiceFields = {
   _id: 1,
@@ -107,7 +107,7 @@ export function serializePublicService(service, vendor, now = new Date()) {
   };
 }
 
-async function loadPublicVendors(services) {
+async function loadPublicVendors(services, database) {
   const vendorIds = [
     ...new Set(
       services
@@ -119,7 +119,6 @@ async function loadPublicVendors(services) {
     return new Map();
   }
 
-  const database = getDatabase();
   const userIds = vendorIds.flatMap((vendorId) => {
     const ids = [vendorId];
     if (/^[a-f\d]{24}$/i.test(vendorId)) {
@@ -149,12 +148,13 @@ const router = Router();
 
 router.get("/", async (req, res) => {
   const { filter, sort } = parsePublicServiceQuery(req.query);
-  const services = await getDatabase()
+  const database = await connectDatabase();
+  const services = await database
     .collection("services")
     .find(filter, { projection: publicServiceFields })
     .sort(sort)
     .toArray();
-  const vendors = await loadPublicVendors(services);
+  const vendors = await loadPublicVendors(services, database);
 
   return res.json({
     success: true,
@@ -169,7 +169,8 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   const serviceId = parseServiceId(req.params.id);
-  const service = await getDatabase()
+  const database = await connectDatabase();
+  const service = await database
     .collection("services")
     .findOne(
       { _id: serviceId, status: "approved", isActive: true },
@@ -180,7 +181,7 @@ router.get("/:id", async (req, res) => {
     throw createHttpError(404, "Service not found");
   }
 
-  const vendors = await loadPublicVendors([service]);
+  const vendors = await loadPublicVendors([service], database);
   return res.json({
     success: true,
     data: serializePublicService(service, vendors.get(String(service.vendorId))),

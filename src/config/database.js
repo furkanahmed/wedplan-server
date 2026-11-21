@@ -2,31 +2,48 @@ import { MongoClient } from "mongodb";
 
 let client;
 let database;
+let connectionPromise;
 
 export async function connectDatabase() {
   if (database) {
     return database;
+  }
+  if (connectionPromise) {
+    return connectionPromise;
   }
 
   if (!process.env.MONGODB_URI || !process.env.DB_NAME) {
     throw new Error("MONGODB_URI and DB_NAME must be configured");
   }
 
-  client = new MongoClient(process.env.MONGODB_URI);
-  await client.connect();
-  await client.db(process.env.DB_NAME).command({ ping: 1 });
-  database = client.db(process.env.DB_NAME);
-  const services = database.collection("services");
-  await services.createIndex({
-    serviceName: "text",
-    description: "text",
-    category: "text",
-    location: "text",
-  });
-  await services.createIndex({ status: 1, isActive: 1 });
+  const pendingClient = new MongoClient(process.env.MONGODB_URI);
+  client = pendingClient;
+  const pendingConnection = (async () => {
+    await pendingClient.connect();
+    const connectedDatabase = pendingClient.db(process.env.DB_NAME);
+    await connectedDatabase.command({ ping: 1 });
+    const services = connectedDatabase.collection("services");
+    await services.createIndex({
+      serviceName: "text",
+      description: "text",
+      category: "text",
+      location: "text",
+    });
+    await services.createIndex({ status: 1, isActive: 1 });
 
-  console.log(`MongoDB connected to ${process.env.DB_NAME}`);
-  return database;
+    database = connectedDatabase;
+    console.log(`MongoDB connected to ${process.env.DB_NAME}`);
+    return database;
+  })();
+  connectionPromise = pendingConnection;
+
+  try {
+    return await pendingConnection;
+  } finally {
+    if (connectionPromise === pendingConnection) {
+      connectionPromise = undefined;
+    }
+  }
 }
 
 export function getDatabase() {
@@ -42,5 +59,6 @@ export async function closeDatabase() {
     await client.close();
     client = undefined;
     database = undefined;
+    connectionPromise = undefined;
   }
 }
