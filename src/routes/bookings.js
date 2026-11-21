@@ -99,6 +99,25 @@ export function parseBookingId(id) {
   return new ObjectId(id);
 }
 
+export async function loadBookingCustomers(database, customerIds) {
+  const customerFilters = customerIds.flatMap((id) =>
+    /^[a-f\d]{24}$/i.test(id)
+      ? [{ _id: id }, { _id: new ObjectId(id) }]
+      : [{ _id: id }],
+  );
+  if (customerFilters.length === 0) {
+    return [];
+  }
+
+  return database
+    .collection("users")
+    .find(
+      { $or: customerFilters },
+      { projection: { name: 1, email: 1 } },
+    )
+    .toArray();
+}
+
 const router = Router();
 
 router.post(
@@ -186,19 +205,7 @@ router.get(
           { projection: { serviceName: 1 } },
         )
         .toArray(),
-      database
-        .collection("users")
-        .find(
-          {
-            $or: customerIds.flatMap((id) =>
-              /^[a-f\d]{24}$/i.test(id)
-                ? [{ _id: id }, { _id: new ObjectId(id) }]
-                : [{ _id: id }],
-            ),
-          },
-          { projection: { name: 1, email: 1 } },
-        )
-        .toArray(),
+      loadBookingCustomers(database, customerIds),
     ]);
     const servicesById = new Map(
       services.map((service) => [String(service._id), service]),

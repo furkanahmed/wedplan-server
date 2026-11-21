@@ -21,6 +21,7 @@ import app from "../src/app.js";
 import { requireRole } from "../src/middleware/requireRole.js";
 import {
   createVendorBookingFilter,
+  loadBookingCustomers,
   parseBookingId,
   parseBookingInput,
   parseBookingStatus,
@@ -141,6 +142,34 @@ test("booking status changes only allow accept or reject and stay vendor-owned",
     "507f1f77bcf86cd799439013",
     "507f1f77bcf86cd799439013",
   ]);
+});
+
+test("vendor booking list skips customer lookup when there are no bookings", async () => {
+  const calls = [];
+  const database = {
+    collection(name) {
+      assert.equal(name, "users");
+      return {
+        find(filter, options) {
+          calls.push({ filter, options });
+          return { toArray: async () => [] };
+        },
+      };
+    },
+  };
+
+  assert.deepEqual(await loadBookingCustomers(database, []), []);
+  assert.equal(calls.length, 0);
+
+  await loadBookingCustomers(database, [
+    "507f1f77bcf86cd799439011",
+    "customer-string-id",
+  ]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].filter.$or.length, 3);
+  assert.deepEqual(calls[0].options, {
+    projection: { name: 1, email: 1 },
+  });
 });
 
 test("requireRole allows vendors and rejects unauthenticated or wrong-role requests", () => {
