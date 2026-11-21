@@ -6,6 +6,7 @@ import vendorRouter from "./routes/vendor.js";
 import bookingsRouter from "./routes/bookings.js";
 import customerRouter from "./routes/customer.js";
 import adminRouter from "./routes/admin.js";
+import paymentsRouter, { handleStripeWebhook } from "./routes/payments.js";
 
 const app = express();
 
@@ -26,6 +27,11 @@ app.use(
     credentials: true,
   }),
 );
+app.post(
+  "/api/v1/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  handleStripeWebhook,
+);
 app.use(express.json());
 
 app.get("/", (req, res) => {
@@ -37,6 +43,7 @@ app.use("/api/v1/vendor", vendorRouter);
 app.use("/api/v1/bookings", bookingsRouter);
 app.use("/api/v1/customer", customerRouter);
 app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/payments", paymentsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

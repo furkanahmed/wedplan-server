@@ -25,15 +25,14 @@ const serviceProjection = {
   createdAt: 1,
 };
 const transactionProjection = {
+  vendorId: 1,
+  plan: 1,
   amount: 1,
   currency: 1,
+  stripeSessionId: 1,
+  stripeSubscriptionId: 1,
   status: 1,
-  type: 1,
   createdAt: 1,
-  customerId: 1,
-  vendorId: 1,
-  bookingId: 1,
-  serviceId: 1,
 };
 const userRoles = new Set(["customer", "vendor", "admin"]);
 const serviceStatuses = new Set(["pending", "approved", "rejected"]);
@@ -209,7 +208,14 @@ export function parseAdminServiceId(id) {
 }
 
 export async function loadAdminOverview(database) {
-  const [totalUsers, vendors, customers, totalServices, pendingServices, transactions] =
+  const [
+    totalUsers,
+    totalVendors,
+    totalCustomers,
+    totalServices,
+    pendingServices,
+    totalTransactions,
+  ] =
     await Promise.all([
       database.collection("users").countDocuments({}),
       database.collection("users").countDocuments({ role: "vendor" }),
@@ -221,11 +227,11 @@ export async function loadAdminOverview(database) {
 
   return {
     totalUsers,
-    vendors,
-    customers,
+    totalVendors,
+    totalCustomers,
     totalServices,
     pendingServices,
-    transactions,
+    totalTransactions,
   };
 }
 

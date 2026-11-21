@@ -36,6 +36,13 @@ export async function connectDatabase() {
     await bookings.createIndex({ customerId: 1, createdAt: -1 });
     await bookings.createIndex({ customerId: 1, serviceId: 1, status: 1 });
     await bookings.createIndex({ serviceId: 1 });
+    await connectedDatabase.collection("transactions").createIndex(
+      { stripeSessionId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { stripeSessionId: { $type: "string" } },
+      },
+    );
 
     database = connectedDatabase;
     console.log(`MongoDB connected to ${process.env.DB_NAME}`);

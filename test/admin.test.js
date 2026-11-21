@@ -98,11 +98,11 @@ test("admin overview counts users, services, pending services, and transactions"
 
   assert.deepEqual(await loadAdminOverview(database), {
     totalUsers: 12,
-    vendors: 3,
-    customers: 8,
+    totalVendors: 3,
+    totalCustomers: 8,
     totalServices: 5,
     pendingServices: 2,
-    transactions: 4,
+    totalTransactions: 4,
   });
   assert.deepEqual(
     calls.map(({ name, filter }) => [name, filter]),

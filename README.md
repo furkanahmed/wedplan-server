@@ -6,19 +6,31 @@ The admin API is available under `/api/v1/admin` and requires a valid
 Better Auth bearer token for an admin account:
 
 - `GET /overview` returns user, vendor, customer, service, pending-service, and
-  transaction counts.
+  transaction counts (`totalUsers`, `totalVendors`, `totalCustomers`,
+  `totalServices`, `pendingServices`, and `totalTransactions`).
 - `GET /users` supports `search`, `role`, `page`, and `pageSize`.
 - `PATCH /users/:id/block` accepts `{ "isBlocked": true|false }`. Admin accounts
   are protected from being blocked.
 - `GET /services` supports `search`, `status`, `page`, and `pageSize`.
 - `PATCH /services/:id` accepts an approved/rejected/pending `status` and/or
   boolean `isActive`; `DELETE /services/:id` removes a service.
-- `GET /transactions` is a read-only, paginated list with a restricted set of
-  summary fields.
+- `GET /transactions` is a read-only, paginated list of subscription records.
 
-The current application does not create payment transactions. The admin
-overview and list read from the `transactions` collection, so they report zero
-and an empty list until a payment flow writes transaction records.
+## Stripe Premium subscriptions
+
+Create a recurring **USD $9/month** Price in Stripe test mode and set its ID as
+`STRIPE_PRICE_ID`. Configure `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in
+the server environment; never commit their values. Forward Stripe CLI events to
+`/api/v1/webhooks/stripe` during local testing.
+
+Vendors start Checkout with `POST /api/v1/payments/checkout`, check their
+webhook-confirmed plan with `GET /api/v1/payments/subscription`, and manage
+cancellation through `POST /api/v1/payments/portal`. The signed webhook handles
+Checkout completion, paid invoices, and subscription deletion. Admins can view
+transactions but cannot modify them.
+
+Transaction `amount` is stored in Stripe's smallest currency unit (for example,
+USD 900 represents $9.00); `currency` is the lowercase Stripe currency code.
 
 ## Development sample services (extra decision)
 
