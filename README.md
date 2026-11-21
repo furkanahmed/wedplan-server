@@ -27,7 +27,8 @@ Vendors start Checkout with `POST /api/v1/payments/checkout`, check their
 webhook-confirmed plan with `GET /api/v1/payments/subscription`, and manage
 cancellation through `POST /api/v1/payments/portal`. The signed webhook handles
 Checkout completion, paid invoices, and subscription deletion. Admins can view
-transactions but cannot modify them.
+transactions but cannot modify them. Stripe Dashboard settings determine the
+payment methods shown during Checkout.
 
 Transaction `amount` is stored in Stripe's smallest currency unit (for example,
 USD 900 represents $9.00); `currency` is the lowercase Stripe currency code.

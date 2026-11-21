@@ -103,6 +103,7 @@ test("vendor Checkout uses the configured recurring price and server-owned metad
 
   assert.equal(session.url, "https://checkout.stripe.test/session");
   assert.equal(createdParams.mode, "subscription");
+  assert.equal(Object.hasOwn(createdParams, "payment_method_types"), false);
   assert.deepEqual(createdParams.line_items, [
     { price: "price_monthly", quantity: 1 },
   ]);
