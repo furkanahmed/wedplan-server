@@ -34,6 +34,18 @@ import {
   loadCustomerOverview,
   parseCustomerProfileInput,
 } from "../src/routes/customer.js";
+import { getJwtConfiguration } from "../src/middleware/auth.js";
+
+test("JWT configuration derives issuer and audience from live JWKS origin", () => {
+  const configuration = getJwtConfiguration({
+    BETTER_AUTH_JWKS_URL:
+      "https://wed-plan-7c5o.vercel.app/api/auth/jwks",
+    JWT_ISSUER: "http://localhost:3000",
+    JWT_AUDIENCE: "http://localhost:3000",
+  });
+  assert.equal(configuration.issuer, "https://wed-plan-7c5o.vercel.app");
+  assert.equal(configuration.audience, "https://wed-plan-7c5o.vercel.app");
+});
 
 test("customer profile input accepts only name and image updates", () => {
   assert.deepEqual(
