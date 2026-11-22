@@ -144,14 +144,14 @@ router.post(
     }
 
     const duplicate = await database.collection("bookings").findOne({
-      customerId: { $in: getUserIds(req.user._id) },
       serviceId: { $in: getObjectIdAndStringIds(fields.serviceId) },
+      eventDate: fields.eventDate,
       status: { $in: ["pending", "accepted"] },
     });
     if (duplicate) {
       throw createHttpError(
         409,
-        "You already have an active booking request for this service",
+        "This service already has an active booking request for the selected date",
       );
     }
 
