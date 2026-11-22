@@ -8,6 +8,7 @@ import {
   parseAdminServiceQuery,
   parseAdminServiceUpdate,
   parseAdminUserBlockInput,
+  parseAdminUserDetailId,
   parseAdminUserId,
   parseAdminUserQuery,
 } from "../src/routes/admin.js";
@@ -76,6 +77,17 @@ test("admin user and service mutations accept only authorized fields", () => {
     parseAdminServiceId("507f1f77bcf86cd799439011").toHexString(),
     "507f1f77bcf86cd799439011",
   );
+});
+
+test("admin user detail IDs must be 24-character ObjectIds", () => {
+  assert.equal(
+    parseAdminUserDetailId("507f1f77bcf86cd799439011").toHexString(),
+    "507f1f77bcf86cd799439011",
+  );
+  assert.throws(() => parseAdminUserDetailId("not-an-object-id"), {
+    statusCode: 400,
+  });
+  assert.throws(() => parseAdminUserDetailId("../users"), { statusCode: 400 });
 });
 
 test("admin overview counts users, services, pending services, and transactions", async () => {

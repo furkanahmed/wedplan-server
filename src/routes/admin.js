@@ -12,6 +12,17 @@ const userProjection = {
   businessName: 1,
   createdAt: 1,
 };
+const userDetailProjection = {
+  name: 1,
+  email: 1,
+  image: 1,
+  role: 1,
+  isBlocked: 1,
+  businessName: 1,
+  subscriptionPlan: 1,
+  subscriptionExpiresAt: 1,
+  createdAt: 1,
+};
 const serviceProjection = {
   serviceName: 1,
   category: 1,
@@ -155,6 +166,13 @@ export function parseAdminUserId(id) {
     throw createHttpError(400, "User ID is invalid");
   }
   return id;
+}
+
+export function parseAdminUserDetailId(id) {
+  if (typeof id !== "string" || !/^[a-f\d]{24}$/i.test(id)) {
+    throw createHttpError(400, "User ID must be a valid MongoDB ObjectId");
+  }
+  return new ObjectId(id);
 }
 
 export function parseAdminUserBlockInput(body) {
@@ -312,6 +330,21 @@ router.get("/users", ...adminOnly, async (req, res) => {
     success: true,
     data: { items, total, page, pageSize },
   });
+});
+
+router.get("/users/:id", ...adminOnly, async (req, res) => {
+  const userId = parseAdminUserDetailId(req.params.id);
+  const database = await connectDatabase();
+  const user = await database
+    .collection("users")
+    .findOne(
+      { _id: { $in: getAdminUserIds(userId) } },
+      { projection: userDetailProjection },
+    );
+  if (!user) {
+    throw createHttpError(404, "User not found");
+  }
+  return res.json({ success: true, data: user });
 });
 
 router.patch("/users/:id/block", ...adminOnly, async (req, res) => {
