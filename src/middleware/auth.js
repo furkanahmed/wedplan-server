@@ -22,15 +22,22 @@ function createHttpError(statusCode, message) {
   return error;
 }
 
-function getJwtConfiguration() {
-  const jwksUrl = process.env.BETTER_AUTH_JWKS_URL;
-  const issuer = process.env.JWT_ISSUER;
-  const audience = process.env.JWT_AUDIENCE;
+export function getJwtConfiguration(environment = process.env) {
+  let jwksUrl = environment.BETTER_AUTH_JWKS_URL;
 
-  if (!jwksUrl || !issuer || !audience) {
+  if (!jwksUrl && environment.BETTER_AUTH_URL) {
+    try {
+      jwksUrl =
+        new URL(environment.BETTER_AUTH_URL).origin + "/api/auth/jwks";
+    } catch {
+      throw createHttpError(500, "BETTER_AUTH_URL must be a valid URL");
+    }
+  }
+
+  if (!jwksUrl) {
     throw createHttpError(
       500,
-      "BETTER_AUTH_JWKS_URL, JWT_ISSUER, and JWT_AUDIENCE must be configured",
+      "BETTER_AUTH_JWKS_URL or BETTER_AUTH_URL must be configured",
     );
   }
 
@@ -44,6 +51,22 @@ function getJwtConfiguration() {
   if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
     throw createHttpError(500, "BETTER_AUTH_JWKS_URL must use HTTP or HTTPS");
   }
+
+  const origin = parsedUrl.origin;
+  const configuredIssuer = environment.JWT_ISSUER;
+  const configuredAudience = environment.JWT_AUDIENCE;
+
+  let issuer = origin;
+  let audience = origin;
+  try {
+    if (configuredIssuer) issuer = new URL(configuredIssuer).origin;
+  } catch {}
+  try {
+    if (configuredAudience) audience = new URL(configuredAudience).origin;
+  } catch {}
+
+  if (issuer !== origin) issuer = origin;
+  if (audience !== origin) audience = origin;
 
   if (!remoteJwks || remoteJwksUrl !== jwksUrl) {
     remoteJwks = createRemoteJWKSet(parsedUrl);
