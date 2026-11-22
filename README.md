@@ -78,7 +78,6 @@ Fill in the variable names below in `.env`. Do not commit this file.
 - `STRIPE_PRICE_ID`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
-- `IMGBB_API_KEY`
 
 Start the development server:
 
