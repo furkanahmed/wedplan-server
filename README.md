@@ -1,63 +1,118 @@
-# WedPlan backend
+# WedPlan Server
 
-## Admin API
+WedPlan Server is the Express.js REST API for the WedPlan wedding planning
+marketplace. It uses MongoDB for data, verifies Better Auth JWTs with `jose`,
+and handles Stripe Checkout and webhook events for Premium subscriptions.
 
-The admin API is available under `/api/v1/admin` and requires a valid
-Better Auth bearer token for an admin account:
+## Features
 
-- `GET /overview` returns user, vendor, customer, service, pending-service, and
-  transaction counts (`totalUsers`, `totalVendors`, `totalCustomers`,
-  `totalServices`, `pendingServices`, and `totalTransactions`).
-- `GET /users` supports `search`, `role`, `page`, and `pageSize`.
-- `PATCH /users/:id/block` accepts `{ "isBlocked": true|false }`. Admin accounts
-  are protected from being blocked.
-- `GET /services` supports `search`, `status`, `page`, and `pageSize`.
-- `PATCH /services/:id` accepts an approved/rejected/pending `status` and/or
-  boolean `isActive`; `DELETE /services/:id` removes a service.
-- `GET /transactions` is a read-only, paginated list of subscription records.
+- Role-based API for customers, vendors, and admins.
+- JWT verification through Better Auth's JWKS endpoint.
+- Database role and `isBlocked` checks on every protected request.
+- Server-side ownership checks for services, bookings, and profile data.
+- Public service search, category and location filtering, and price sorting.
+- Free plan limit of three active services per vendor.
+- Booking rules: no duplicate active booking for the same service and event
+  date; only pending bookings can be cancelled or accepted/rejected.
+- Stripe Checkout subscriptions and webhook-based Premium activation.
+- Admin tools for users, services, overview counts, and read-only transactions.
+- Admin seed script for creating or updating the admin account.
 
-## Stripe Premium subscriptions
+## Technology Stack
 
-Create a recurring **USD $9/month** Price in Stripe test mode and set its ID as
-`STRIPE_PRICE_ID`. Configure `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in
-the server environment; never commit their values. Forward Stripe CLI events to
-`/api/v1/webhooks/stripe` during local testing.
+Versions are taken from `package.json`.
 
-Vendors start Checkout with `POST /api/v1/payments/checkout`, check their
-webhook-confirmed plan with `GET /api/v1/payments/subscription`, and manage
-cancellation through `POST /api/v1/payments/portal`. The signed webhook handles
-Checkout completion, paid invoices, and subscription deletion. Admins can view
-transactions but cannot modify them. Stripe Dashboard settings determine the
-payment methods shown during Checkout.
+- Node.js with ES modules
+- Express `5.3.0`
+- MongoDB Node.js driver `7.9.0`
+- `jose` `6.2.17`
+- Stripe `23.1.0`
+- CORS `2.8.6`
+- dotenv `18.0.10`
+- Node.js built-in test runner
 
-Transaction `amount` is stored in Stripe's smallest currency unit (for example,
-USD 900 represents $9.00); `currency` is the lowercase Stripe currency code.
+## Live API
 
-## Development sample services (extra decision)
+- API: https://wedplan-server-liart.vercel.app
+- Public services endpoint: https://wedplan-server-liart.vercel.app/api/v1/services
+- Live site: https://wed-plan-7c5o.vercel.app
 
-The development seed contains eight fictional sample listings and three
-fictional vendor accounts: Lens & Vows Studio, Green Leaf Convention, and Glow
-by Nusrat. These sample packages and prices are for development only; they do
-not describe real businesses or guaranteed services. The six newest seeded
-listings cover all six assignment categories. Stock images are downloaded from
-Pexels and uploaded to ImgBB; they are illustrative images, not vendor
-portfolios. Review the [Pexels license](https://www.pexels.com/license/) before
-use.
+The root API URL only shows a status message. The public services endpoint
+returns approved services as JSON.
 
-To seed:
+## Repositories
 
-1. Set `MONGODB_URI`, `DB_NAME`, and a localhost
-   `CLIENT_ORIGIN` in the backend environment.
-2. Set a local-only `DEV_VENDOR_PASSWORD` if the seed needs to create demo
-   vendor accounts. Do not commit this value.
-3. Set `IMGBB_API_KEY` in the frontend `.env.local` and restart the frontend.
-4. Keep the frontend running, then run `npm run seed-dev-services` from this
-   backend repository.
+- Client: https://github.com/furkanahmed/WedPlan
+- Server: https://github.com/furkanahmed/wedplan-server
 
-The seed command refuses non-development environments and non-local upload
-origins, checks the free-vendor active-service limit, and can be safely
-re-run. It adds `devSeedTag` and `devSeedKey` metadata to seeded service
-documents so `npm run seed-dev-services -- --cleanup` removes only those
-records. Cleanup does not delete images already uploaded to ImgBB. Replace the
-sample records with listings created through the product UI before final
-submission.
+## Installation and Local Development
+
+Clone the server repository and install dependencies:
+
+```bash
+git clone https://github.com/furkanahmed/wedplan-server.git
+cd wedplan-server
+npm install
+```
+
+Create the local environment file:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell, use `Copy-Item .env.example .env` instead.
+
+Fill in the variable names below in `.env`. Do not commit this file.
+
+- `PORT`
+- `NODE_ENV`
+- `MONGODB_URI`
+- `DB_NAME`
+- `CLIENT_ORIGIN`
+- `BETTER_AUTH_JWKS_URL`
+- `JWT_ISSUER`
+- `JWT_AUDIENCE`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_ID`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `IMGBB_API_KEY`
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+Run the test suite:
+
+```bash
+npm test
+```
+
+## Admin Seed
+
+Run the seed script from the backend repository:
+
+```bash
+npm run seed-admin
+```
+
+The script creates or updates the admin account. The credentials come from the
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables. The frontend must be
+running and `CLIENT_ORIGIN` must point to it because the script uses Better Auth
+to create or sign in the account. The account is then assigned the `admin` role
+in MongoDB.
+
+## Extra Decisions
+
+These decisions go beyond the assignment PDF:
+
+- Services include an extra `isActive` field for vendor availability.
+- `isActiveBooking` is not used.
+- Stripe webhook events handled: `checkout.session.completed`, `invoice.paid`,
+  and `customer.subscription.deleted`.
+- Google sign-in creates Customer accounts. Vendors register with email and
+  password.
