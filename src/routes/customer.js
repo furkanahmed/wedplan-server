@@ -146,7 +146,7 @@ router.patch("/bookings/:id/cancel", ...customerOnly, async (req, res) => {
   const collection = database.collection("bookings");
   const filter = {
     ...createCustomerBookingFilter(bookingId, req.user._id),
-    status: { $in: ["pending", "accepted"] },
+    status: "pending",
   };
   const result = await collection.updateOne(filter, {
     $set: { status: "cancelled", cancelledAt: new Date() },

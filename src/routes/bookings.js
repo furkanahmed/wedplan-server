@@ -308,7 +308,7 @@ router.patch(
     const filter = {
       _id: bookingId,
       customerId: { $in: getUserIds(req.user._id) },
-      status: { $in: ["pending", "accepted"] },
+      status: "pending",
     };
     const result = await collection.updateOne(filter, {
       $set: { status: "cancelled", cancelledAt: new Date() },
